@@ -12,6 +12,10 @@ from app.mcp.client import search_documents_via_mcp_sync
 
 load_dotenv()
 
+OLLAMA_BASE_URL = os.getenv(
+    "OLLAMA_BASE_URL",
+    "http://localhost:11434"
+)
 REWRITE_MODEL = os.getenv(
     "REWRITE_MODEL",
     "llama3.2:3b"
@@ -27,9 +31,9 @@ RELEVANCE_THRESHOLD = float(
 
 rewrite_llm = ChatOllama(
     model=REWRITE_MODEL,
-    temperature=0
+    temperature=0,
+    base_url=OLLAMA_BASE_URL
 )
-
 
 class RAGState(TypedDict, total=False):
     question: str

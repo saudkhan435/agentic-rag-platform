@@ -1,3 +1,5 @@
+import asyncio
+import shutil
 from pathlib import Path
 
 from mcp import Client, StdioServerParameters
@@ -5,12 +7,12 @@ from mcp import Client, StdioServerParameters
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-MCP_COMMAND = (
-    PROJECT_ROOT
-    / ".venv"
-    / "bin"
-    / "mcp"
-)
+MCP_COMMAND = shutil.which("mcp")
+
+if not MCP_COMMAND:
+    raise RuntimeError(
+        "The 'mcp' command was not found in PATH"
+    )
 
 MCP_SERVER = (
     PROJECT_ROOT
@@ -26,7 +28,7 @@ async def search_documents_via_mcp(
 ) -> list[dict]:
 
     server = StdioServerParameters(
-        command=str(MCP_COMMAND),
+        command=MCP_COMMAND,
         args=[
             "run",
             str(MCP_SERVER)
@@ -59,8 +61,6 @@ async def search_documents_via_mcp(
         raise RuntimeError(
             "MCP tool returned no structured output"
         )
-
-import asyncio
 
 
 def search_documents_via_mcp_sync(

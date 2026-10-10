@@ -14,6 +14,45 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: agentic-rag-app
+
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+
+      GENERATION_MODEL: ${GENERATION_MODEL}
+      REWRITE_MODEL: ${REWRITE_MODEL}
+
+      RELEVANCE_THRESHOLD: ${RELEVANCE_THRESHOLD}
+      MAX_RETRIES: ${MAX_RETRIES}
+
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 
 volumes:
   postgres_data:

@@ -10,6 +10,11 @@ from app.retrieval.service import retrieve_context
 
 load_dotenv()
 
+OLLAMA_BASE_URL = os.getenv(
+    "OLLAMA_BASE_URL",
+    "http://localhost:11434"
+)
+
 MODEL_NAME = os.getenv(
     "GENERATION_MODEL",
     "qwen2.5:7b"
@@ -17,7 +22,8 @@ MODEL_NAME = os.getenv(
 
 llm = ChatOllama(
     model=MODEL_NAME,
-    temperature=0
+    temperature=0,
+    base_url=OLLAMA_BASE_URL
 )
 
 
