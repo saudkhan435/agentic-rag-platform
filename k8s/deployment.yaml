@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: agentic-rag-app
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: agentic-rag-app
+
+  template:
+    metadata:
+      labels:
+        app: agentic-rag-app
+
+    spec:
+      containers:
+        - name: agentic-rag-app
+
+          image: agentic-rag-platform-app:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 8000
+
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agentic-rag-secrets
+                  key: DATABASE_URL
+
+            - name: GENERATION_MODEL
+              value: "qwen2.5:7b"
+
+            - name: REWRITE_MODEL
+              value: "llama3.2:3b"
+
+            - name: RELEVANCE_THRESHOLD
+              value: "-3.0"
+
+            - name: MAX_RETRIES
+              value: "1"
+
+            - name: OLLAMA_BASE_URL
+              value: "http://host.docker.internal:11434"

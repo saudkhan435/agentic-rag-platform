@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shutil
 from pathlib import Path
 
@@ -28,13 +29,16 @@ async def search_documents_via_mcp(
 ) -> list[dict]:
 
     server = StdioServerParameters(
-        command=MCP_COMMAND,
-        args=[
-            "run",
-            str(MCP_SERVER)
-        ],
-        cwd=str(PROJECT_ROOT)
-    )
+    command=MCP_COMMAND,
+    args=[
+        "run",
+        str(MCP_SERVER)
+    ],
+    cwd=str(PROJECT_ROOT),
+    env={
+        "DATABASE_URL": os.environ["DATABASE_URL"]
+    }
+)
 
     async with Client(server) as client:
         result = await client.call_tool(
