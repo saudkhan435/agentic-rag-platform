@@ -1,21 +1,25 @@
+import logging
 import os
-
-from dotenv import load_dotenv
-
 from typing import Literal, TypedDict
 
+from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
 from app.generation.service import generate_answer
 from app.mcp.client import search_documents_via_mcp_sync
 
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
 
 OLLAMA_BASE_URL = os.getenv(
     "OLLAMA_BASE_URL",
     "http://localhost:11434"
 )
+
 REWRITE_MODEL = os.getenv(
     "REWRITE_MODEL",
     "llama3.2:3b"
@@ -29,11 +33,13 @@ RELEVANCE_THRESHOLD = float(
     os.getenv("RELEVANCE_THRESHOLD", "-3.0")
 )
 
+
 rewrite_llm = ChatOllama(
     model=REWRITE_MODEL,
     temperature=0,
     base_url=OLLAMA_BASE_URL
 )
+
 
 class RAGState(TypedDict, total=False):
     question: str
@@ -51,9 +57,19 @@ def retrieve_node(state: RAGState) -> dict:
         state["question"]
     )
 
+    logger.info(
+        "Retrieval started | query=%r",
+        search_query
+    )
+
     results = search_documents_via_mcp_sync(
         query=search_query,
         limit=5
+    )
+
+    logger.info(
+        "Retrieval completed | results=%d",
+        len(results)
     )
 
     return {
@@ -62,27 +78,28 @@ def retrieve_node(state: RAGState) -> dict:
 
 
 def evaluate_retrieval_node(state: RAGState) -> dict:
-    context = state.get("context", [])
-
-    if not context:
-        return {
-            "retrieval_good": False
-        }
+    results = state.get("context", [])
 
     best_score = max(
-        result["rerank_score"]
-        for result in context
+        (
+            result["rerank_score"]
+            for result in results
+        ),
+        default=float("-inf")
     )
 
     retrieval_good = (
         best_score >= RELEVANCE_THRESHOLD
     )
 
-    print(
-        f"Best rerank score: {best_score:.4f}"
-    )
-    print(
-        f"Retrieval good: {retrieval_good}"
+    logger.info(
+        "Retrieval evaluated | "
+        "best_score=%.4f | "
+        "threshold=%.4f | "
+        "good=%s",
+        best_score,
+        RELEVANCE_THRESHOLD,
+        retrieval_good
     )
 
     return {
@@ -92,70 +109,120 @@ def evaluate_retrieval_node(state: RAGState) -> dict:
 
 def choose_next_step(
     state: RAGState
-) -> Literal["generate", "rewrite", "insufficient"]:
-
+) -> Literal[
+    "generate",
+    "rewrite",
+    "insufficient"
+]:
     retries = state.get("retries", 0)
 
     if state["retrieval_good"]:
+        logger.info(
+            "Routing decision | route=generate | retries=%d",
+            retries
+        )
+
         return "generate"
 
     if retries >= MAX_RETRIES:
+        logger.warning(
+            "Routing decision | "
+            "route=insufficient | retries=%d",
+            retries
+        )
+
         return "insufficient"
+
+    logger.info(
+        "Routing decision | route=rewrite | retries=%d",
+        retries
+    )
 
     return "rewrite"
 
-def insufficient_context_node(
-    state: RAGState
-) -> dict:
-    return {
-        "answer": (
-            "The available documents do not provide "
-            "enough information."
-        ),
-        "sources": []
-    }
 
 def rewrite_query_node(state: RAGState) -> dict:
+    question = state["question"]
+    retries = state.get("retries", 0)
+
     prompt = f"""
-Rewrite the user's question into a concise search query
-for semantic document retrieval.
+Rewrite the following question into a concise semantic search query.
 
 Rules:
-1. Preserve the original meaning.
-2. Preserve important entities and nouns from the question.
-3. Do not invent new concepts that the user did not mention.
-4. Convert vague wording into clearer retrieval terminology.
-5. Prefer a short noun phrase rather than a full sentence.
-6. Do not answer the question.
-7. Return only the rewritten query.
+- Preserve the original meaning.
+- Preserve important entities and nouns.
+- Do not invent new concepts.
+- Convert vague wording into clearer wording when possible.
+- Prefer a short noun phrase.
+- Do not answer the question.
+- Return only the rewritten search query.
 
-Original question:
-{state["question"]}
+Question:
+{question}
+
+Search query:
 """
 
     response = rewrite_llm.invoke(prompt)
 
-    rewritten_query = response.content.strip()
+    rewritten_query = str(response.content).strip()
 
-    print(
-        f"Rewritten query: {rewritten_query}"
+    logger.info(
+        "Query rewritten | "
+        "original=%r | "
+        "rewritten=%r | "
+        "retry=%d",
+        question,
+        rewritten_query,
+        retries + 1
     )
 
     return {
         "search_query": rewritten_query,
-        "retries": state.get("retries", 0) + 1
+        "retries": retries + 1
     }
 
 
 def generate_node(state: RAGState) -> dict:
+    context = state.get("context", [])
+
+    logger.info(
+        "Answer generation started | context_chunks=%d",
+        len(context)
+    )
+
     result = generate_answer(
         question=state["question"],
-        results=state["context"]
+        results=context
+    )
+
+    logger.info(
+        "Answer generation completed | sources=%d",
+        len(result["sources"])
     )
 
     return {
         "answer": result["answer"],
         "sources": result["sources"]
+    }
+
+
+def insufficient_context_node(
+    state: RAGState
+) -> dict:
+    logger.warning(
+        "Retrieval insufficient after retries | "
+        "question=%r | retries=%d",
+        state["question"],
+        state.get("retries", 0)
+    )
+
+    return {
+        "answer": (
+            "The available documents do not "
+            "provide enough information."
+        ),
+        "sources": []
     }
 
 
@@ -167,12 +234,12 @@ workflow.add_node(
 )
 
 workflow.add_node(
-    "evaluate_retrieval",
+    "evaluate",
     evaluate_retrieval_node
 )
 
 workflow.add_node(
-    "rewrite_query",
+    "rewrite",
     rewrite_query_node
 )
 
@@ -194,21 +261,21 @@ workflow.add_edge(
 
 workflow.add_edge(
     "retrieve",
-    "evaluate_retrieval"
+    "evaluate"
 )
 
 workflow.add_conditional_edges(
-    "evaluate_retrieval",
+    "evaluate",
     choose_next_step,
     {
         "generate": "generate",
-        "rewrite": "rewrite_query",
+        "rewrite": "rewrite",
         "insufficient": "insufficient"
     }
 )
 
 workflow.add_edge(
-    "rewrite_query",
+    "rewrite",
     "retrieve"
 )
 
@@ -221,10 +288,17 @@ workflow.add_edge(
     "insufficient",
     END
 )
+
+
 rag_graph = workflow.compile()
 
 
 def run_rag_graph(question: str) -> dict:
+    logger.info(
+        "RAG workflow started | question=%r",
+        question
+    )
+
     result = rag_graph.invoke(
         {
             "question": question,
@@ -233,7 +307,12 @@ def run_rag_graph(question: str) -> dict:
         }
     )
 
+    logger.info(
+        "RAG workflow completed | sources=%d",
+        len(result.get("sources", []))
+    )
+
     return {
         "answer": result["answer"],
-        "sources": result["sources"]
+        "sources": result.get("sources", [])
     }

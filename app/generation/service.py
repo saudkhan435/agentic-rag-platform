@@ -1,24 +1,29 @@
+import logging
 import os
+import re
+import time
 
 from dotenv import load_dotenv
-
-import re
-
 from langchain_ollama import ChatOllama
 
 from app.retrieval.service import retrieve_context
 
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+MODEL_NAME = os.getenv(
+    "GENERATION_MODEL",
+    "qwen2.5:7b"
+)
 
 OLLAMA_BASE_URL = os.getenv(
     "OLLAMA_BASE_URL",
     "http://localhost:11434"
 )
 
-MODEL_NAME = os.getenv(
-    "GENERATION_MODEL",
-    "qwen2.5:7b"
-)
 
 llm = ChatOllama(
     model=MODEL_NAME,
@@ -31,6 +36,14 @@ def generate_answer(
     question: str,
     results: list[dict]
 ) -> dict:
+    logger.info(
+        "LLM generation started | "
+        "model=%s | context_chunks=%d",
+        MODEL_NAME,
+        len(results)
+    )
+
+    generation_start = time.perf_counter()
 
     context_blocks = []
     sources = []
@@ -84,7 +97,23 @@ Context:
 Answer:
 """
 
-    response = llm.invoke(prompt)
+    try:
+        response = llm.invoke(prompt)
+
+    except Exception:
+        elapsed = (
+            time.perf_counter()
+            - generation_start
+        )
+
+        logger.exception(
+            "LLM generation failed | "
+            "model=%s | duration=%.2fs",
+            MODEL_NAME,
+            elapsed
+        )
+
+        raise
 
     answer = response.content
 
@@ -99,8 +128,22 @@ Answer:
     cited_sources = [
         source
         for source in sources
-        if source["chunk_index"] in cited_chunk_numbers
+        if source["chunk_index"]
+        in cited_chunk_numbers
     ]
+
+    elapsed = (
+        time.perf_counter()
+        - generation_start
+    )
+
+    logger.info(
+        "LLM generation completed | "
+        "model=%s | duration=%.2fs | sources=%d",
+        MODEL_NAME,
+        elapsed,
+        len(cited_sources)
+    )
 
     return {
         "answer": answer,

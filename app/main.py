@@ -1,19 +1,54 @@
 import os
 import tempfile
-
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import time
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-
+import logging
 from app.database.connection import test_connection
 from app.workflow.rag_graph import run_rag_graph
 from app.ingestion.service import ingest_pdf
+from app.core.logging_config import configure_logging
 
-
+configure_logging()
+logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Agentic RAG Platform",
     version="0.1.0",
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+
+    except Exception:
+        duration = time.perf_counter() - start_time
+
+        logger.exception(
+            "HTTP request failed | "
+            "method=%s | path=%s | duration=%.2fs",
+            request.method,
+            request.url.path,
+            duration
+        )
+
+        raise
+
+    duration = time.perf_counter() - start_time
+
+    logger.info(
+        "HTTP request completed | "
+        "method=%s | path=%s | "
+        "status=%d | duration=%.2fs",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration
+    )
+
+    return response
 
 class AskRequest(BaseModel):
     question: str
