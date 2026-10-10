@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql+psycopg://raguser:ragpassword@localhost:5432/ragdb
+      GENERATION_MODEL: qwen2.5:7b
+      REWRITE_MODEL: llama3.2:3b
+      RELEVANCE_THRESHOLD: "-3.0"
+      MAX_RETRIES: "1"
+      OLLAMA_BASE_URL: http://localhost:11434
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest tests -v
